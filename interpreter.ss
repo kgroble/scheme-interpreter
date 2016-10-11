@@ -177,12 +177,12 @@
             (2nd datum))
           (map parse-exp (cddr datum)))]
       [(eq? (car datum) 'quote)
-        (lit-exp datum)]
-          [else 
-            (if (not (list? (cdr datum)))
-              (eopl:error 'parse-exp "bad argument list in application: ~s" datum))
-            (app-exp (parse-exp (1st datum))
-            (map parse-exp (cdr datum)))])]
+        (lit-exp (cadr datum))]
+      [else 
+        (if (not (list? (cdr datum)))
+          (eopl:error 'parse-exp "bad argument list in application: ~s" datum))
+        (app-exp (parse-exp (1st datum))
+        (map parse-exp (cdr datum)))])]
      [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
 
@@ -226,7 +226,7 @@
           (let ([pos (rib-find-position symbol symbols)])
             (if (number? pos)
                 (success (vector-ref values pos))
-                (apply-env env symbol)))))))
+                (apply-env enclosing-env symbol success fail)))))))
 
 
 ; Environment definitions for CSSE 304 Scheme interpreter.  Based on EoPL section 2.3
@@ -348,7 +348,7 @@
                    "Attempt to apply bad procedure: ~s"
                     proc-value)])))
 
-(define *prim-proc-names* '(+ - * add1 sub1 cons =))
+(define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr list null? assq))
 
 (define global-env         ; for now, our initial global environment only contains
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -368,7 +368,7 @@
       [(*) (apply * args)]
       [(/) (apply / args)]
       [(add1) (apply add1 args)]
-      [(sub1) (apply sub1 args)]
+      [(sub1) (apply sub1 args)] 
       [(zero?) (apply zero? args)]
       [(=) (apply = args)]
       [(<) (apply < args)]
