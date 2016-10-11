@@ -12,20 +12,6 @@
 ; parsed expression
 
 (define-datatype expression expression?
-  [var-exp        ; variable references
-   (id symbol?)]
-  [lit-exp        ; "Normal" data.  Did I leave out any types?
-   (datum
-    (lambda (x)
-      (ormap
-       (lambda (pred) (pred x))
-       (list number? vector? boolean? symbol? string? pair? null?))))]
-  [app-exp        ; applications
-   (rator expression?)
-   (rands (list-of expression?))]
-  )
-
-(define-datatype expression expression?
   [var-exp
     (id symbol?)]
   [lit-exp
@@ -316,31 +302,38 @@
 (define top-level-eval
   (lambda (form)
     ; later we may add things that are not expressions.
-    (eval-exp form)))
+    (eval-exp form (empty-env))))
 
 ; eval-exp is the main component of the interpreter
 
 (define eval-exp
-  (lambda (exp)
-    (cases expression exp
-           [lit-exp (datum) datum]
-           [var-exp (id)
-                    (apply-env
-                     init-env id ; look up its value.
-                     (lambda (x) x) ; procedure to call if id is in the environment
-                     (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
-                                            "variable not found in environment: ~s" id)))]
-           [app-exp (rator rands)
-                    (let ([proc-value (eval-exp rator)]
-                          [args (eval-rands rands)])
-                      (apply-proc proc-value args))]
-           [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)])))
-
+  (let ((identity-proc (lambda (x) x)))
+    (lambda (exp env)
+        (cases expression exp
+               [lit-exp (datum) datum]
+               [if-else-exp (conditional-exp then-exp else-exp)
+                (if (eval-exp conditional-exp env)
+                  (eval-exp then-exp env)
+                  (eval-exp else-exp env))]
+               [var-exp (id)
+                        (apply-env env id ; look up its value.
+                         identity-proc ; procedure to call if id is in the environment
+                         (lambda () 
+                          (apply-env global-env id
+                            identity-proc
+                            (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
+                                                "variable not found in environment: ~s" id)))))]
+               [app-exp (rator rands)
+                        (let ([proc-value (eval-exp rator env)]
+                              [args (eval-rands rands env)])
+                          (apply-proc proc-value args))]
+               [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
+  
 ; evaluate the list of operands, putting results into a list
 
 (define eval-rands
-  (lambda (rands)
-    (map eval-exp rands)))
+  (lambda (rands env)
+    (map (lambda (exp) (eval-exp exp env)) rands)))
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.
@@ -357,7 +350,7 @@
 
 (define *prim-proc-names* '(+ - * add1 sub1 cons =))
 
-(define init-env         ; for now, our initial global environment only contains
+(define global-env         ; for now, our initial global environment only contains
   (extend-env            ; procedure names.  Recall that an environment associates
      *prim-proc-names*   ;  a value (not an expression) with an identifier.
      (map prim-proc
@@ -370,13 +363,25 @@
 (define apply-prim-proc
   (lambda (prim-proc args)
     (case prim-proc
-      [(+) (+ (1st args) (2nd args))]
-      [(-) (- (1st args) (2nd args))]
-      [(*) (* (1st args) (2nd args))]
-      [(add1) (+ (1st args) 1)]
-      [(sub1) (- (1st args) 1)]
-      [(cons) (cons (1st args) (2nd args))]
-      [(=) (= (1st args) (2nd args))]
+      [(+) (apply + args)]
+      [(-) (apply - args)]
+      [(*) (apply * args)]
+      [(/) (apply / args)]
+      [(add1) (apply add1 args)]
+      [(sub1) (apply sub1 args)]
+      [(zero?) (apply zero? args)]
+      [(=) (apply = args)]
+      [(<) (apply < args)]
+      [(<=) (apply <= args)]
+      [(>) (apply > args)]
+      [(>=) (apply >= args)]
+      [(not) (apply not args)]
+      [(cons) (apply cons args)]
+      [(car) (apply car args)]
+      [(cdr) (apply cdr args)]
+      [(list) (apply list args)]
+      [(null?) (apply null? args)]
+      [(assq) (apply assq args)]
       [else (error 'apply-prim-proc
             "Bad primitive procedure name: ~s"
             prim-proc)])))
