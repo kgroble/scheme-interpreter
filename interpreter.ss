@@ -12,24 +12,24 @@
 ; parsed expression
 
 (define-datatype expression expression?
-  [var-exp
+  [var-exp ; var expression
     (id symbol?)]
-  [lit-exp
+  [lit-exp ; literal expression
     (val (lambda (x)
             (ormap
               (lambda (pred) (pred x))
               (list number? vector? boolean? symbol? string? pair? null?))))]
-  [if-exp
+  [if-exp ; if expressions
     (conditional expression?)
     (body expression?)]
   [if-else-exp
     (conditional expression?)
     (body expression?)
     (fallback expression?)]
-  [set-exp
+  [set-exp ; set expression
     (id symbol?)
     (body expression?)]
-  [let-exp
+  [let-exp ; let expressions
     (vars (list-of symbol?))
     (vals (list-of expression?))
     (bodies (list-of expression?))]
@@ -46,29 +46,27 @@
     (vars (list-of symbol?))
     (vals (list-of expression?))
     (bodies (list-of expression?))]
-  [lambda-exp
+  [lambda-exp ; lambda expressions
     (ids (list-of symbol?))
     (bodies (list-of expression?))]
   [lambda-variable-exp
     (ids (lambda (x) (or (symbol? x) (improper? x))))
     (bodies (list-of expression?))]
-  [app-exp
+  [app-exp ; application expression
     (rator expression?)
     (rands (list-of expression?))])
 
-;;(define-datatype environment environment?
-  ;;(empty-env-record)
-  ;;(extended-env-record
-   ;;(syms (list-of symbol?))
-   ;;(vals (list-of scheme-value?))
-   ;;(env environment?)))
 
 ; datatype for procedures.  At first there is only one
 ; kind of procedure, but more kinds will be added later.
 
 (define-datatype proc-val proc-val?
   [prim-proc
-   (name symbol?)])
+   (name symbol?)]
+  [closure
+   (vars (list-of symbol?))
+   (bodies (list-of expression?))
+   (env (list-of pair?))])
 
 
 
@@ -81,7 +79,8 @@
 
 ; This is a parser for simple Scheme expressions, such as those in EOPL, 3.1 thru 3.3.
 
-; You will want to replace this with your parser that includes more expression types, more options for these types, and error-checking.
+; You will want to replace this with your parser that includes more expression
+; types, more options for these types, and error-checking.
 
 ; Procedures to make the parser a little bit saner.
 (define 1st car)
@@ -89,17 +88,25 @@
 (define 3rd caddr)
 (define 4th cadddr)
 
-(define parse-exp         
+(define parse-exp
   (lambda (datum)
     (cond
-     [(symbol? datum) (var-exp datum)]
-     [(or (number? datum) (boolean? datum) (string? datum) (vector? datum)) (lit-exp datum)]
+
+     [(symbol? datum)
+      (var-exp datum)] ; var expression
+
+     [(or (number? datum)
+          (boolean? datum)
+          (string? datum)
+          (vector? datum))
+      (lit-exp datum)] ; literal expression
+
      [(pair? datum)
       (cond
-          [(eqv? (car datum) 'lambda)
+          [(eqv? (car datum) 'lambda) ; lambda expression
             (if (< (length datum) 3)
               (eopl:error 'parse-exp "incorrect length in lambda expression ~s" datum))
-            (cond 
+            (cond
               [((list-of symbol?) (2nd datum))
                 (lambda-exp (2nd  datum)
                 (map parse-exp (cddr datum)))]
@@ -108,81 +115,89 @@
                   (map parse-exp (cddr datum)))]
             [else
               (eopl:error 'parse-exp "bad lambda expression: ~s" datum)])]
-      [(eqv? (car datum) 'if)
+
+      [(eqv? (car datum) 'if) ; if expression
         (cond
           [(= 3 (length datum))
-            (if-exp 
+            (if-exp ; one-armed if expression
               (parse-exp (2nd datum))
               (parse-exp (3rd datum)))]
           [(= 4 (length datum))
-            (if-else-exp 
+            (if-else-exp ; two-armed if expression
               (parse-exp (2nd datum))
-              (parse-exp (3rd datum)) 
+              (parse-exp (3rd datum))
               (parse-exp (4th datum)))]
           [else
             (eopl:error 'parse-exp "incorrect length in if expression: ~s" datum)])]
-      [(eqv? (car datum) 'set!)
+
+      [(eqv? (car datum) 'set!) ; set!
         (if (not (= 3 (length datum)))
           (eopl:error 'parse-exp "incorrect length in set! expression: ~s" datum))
         (if (not (symbol? (2nd datum)))
           (eopl:error 'parse-exp "must set a symbol in set! expression: ~s" datum))
         (set-exp (2nd datum) (parse-exp (3rd datum)))]
-      [(eqv? (car datum) 'let)
+
+      [(eqv? (car datum) 'let) ; let expression
         (cond
           [(< (length datum) 3)
             (eopl:error 'parse-exp "too short let expression: ~s" datum)]
-          [(symbol? (2nd datum))
-            (if (not (and 
+          [(symbol? (2nd datum)) ; named let
+            (if (not (and
               (list? (3rd datum))
-              (andmap (lambda (x) 
+              (andmap (lambda (x)
                 (and (list? x) (= 2 (length x)) (symbol? (car x)))) (3rd datum))))
               (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
-            (named-let-exp
+            (named-let-exp ; returning a named-let expression
               (2nd datum)
               (map car (3rd datum))
               (map (lambda (x) (parse-exp (cadr x))) (3rd datum))
               (map parse-exp (cdddr datum)))]
-          [else
-            (if (not (and 
+          [else ; normal let
+            (if (not (and
               (list? (2nd datum))
-              (andmap (lambda (x) 
+              (andmap (lambda (x)
                 (and (list? x) (= 2 (length x)) (symbol? (car x)))) (2nd datum))))
               (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
-            (let-exp 
+            (let-exp ; returns a let-expression
               (map car (2nd datum))
               (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
               (map parse-exp (cddr datum)))])]
-      [(eqv? (car datum) 'let*)
+
+      [(eqv? (car datum) 'let*) ; let* expression
         (if (< (length datum) 3)
           (eopl:error 'parse-exp "too short let expression: ~s" datum))
-        (if (not (and 
+        (if (not (and
           (list? (2nd datum))
-          (andmap (lambda (x) 
+          (andmap (lambda (x)
             (and (list? x) (= 2 (length x)) (symbol? (car x)))) (2nd datum))))
           (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
-        (let*-exp 
+        (let*-exp
           (map car (2nd datum))
           (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
           (map parse-exp (cddr datum)))]
-      [(eqv? (car datum) 'letrec)
+
+      [(eqv? (car datum) 'letrec) ; letrec expression
         (if (< (length datum) 3)
           (eopl:error 'parse-exp "too short let expression: ~s" datum))
-        (if (not (and 
+        (if (not (and
           (list? (2nd datum))
-          (andmap (lambda (x) 
+          (andmap (lambda (x)
             (and (list? x) (= 2 (length x)) (symbol? (car x)))) (2nd datum))))
           (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
-        (letrec-exp 
+        (letrec-exp
           (map car (2nd datum))
           (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
           (map parse-exp (cddr datum)))]
-      [(eq? (car datum) 'quote)
+
+      [(eq? (car datum) 'quote) ; literal expression
         (lit-exp (cadr datum))]
-      [else 
+
+      [else ; application expression
         (if (not (list? (cdr datum)))
           (eopl:error 'parse-exp "bad argument list in application: ~s" datum))
         (app-exp (parse-exp (1st datum))
         (map parse-exp (cdr datum)))])]
+
      [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
 
@@ -231,14 +246,6 @@
 
 ; Environment definitions for CSSE 304 Scheme interpreter.  Based on EoPL section 2.3
 
-;;(define empty-env
-  ;;(lambda ()
-    ;;(empty-env-record)))
-
-;;(define extend-env
-  ;;(lambda (syms vals env)
-    ;;(extended-env-record syms vals env)))
-
 (define rib-find-position
   (lambda (sym los)
     (list-index (lambda (xsym) (eqv? sym xsym)) los)))
@@ -252,17 +259,6 @@
              (if (number? list-index-r)
                  (+ 1 list-index-r)
                  #f))))))
-
-;;(define apply-env
-  ;;(lambda (env sym succeed fail) ; succeed and fail are procedures applied if the var is or isn't found, respectively.
-    ;;(cases environment env
-      ;;(empty-env-record ()
-        ;;(fail))
-      ;;(extended-env-record (syms vals env)
-	;;(let ((pos (list-find-position sym syms)))
-      	  ;;(if (number? pos)
-	      ;;(succeed (list-ref vals pos))
-	      ;;(apply-env env sym succeed fail)))))))
 
 
 
@@ -304,7 +300,9 @@
     ; later we may add things that are not expressions.
     (eval-exp form (empty-env))))
 
+
 ; eval-exp is the main component of the interpreter
+; evaluates an expression
 
 (define eval-exp
   (let ((identity-proc (lambda (x) x)))
@@ -315,13 +313,17 @@
                 (if (eval-exp conditional-exp env)
                   (eval-exp then-exp env)
                   (eval-exp else-exp env))]
+
+               [lambda-exp (vars bodies)
+                           (closure vars bodies env)]
+
                [let-exp (vars vals bodies)
                 (let ((new-env (extend-env vars (eval-rands vals env) env)))
                   (eval-bodies bodies new-env))]
                [var-exp (id)
                         (apply-env env id ; look up its value.
                          identity-proc ; procedure to call if id is in the environment
-                         (lambda () 
+                         (lambda ()
                           (apply-env global-env id
                             identity-proc
                             (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
@@ -331,21 +333,24 @@
                               [args (eval-rands rands env)])
                           (apply-proc proc-value args))]
                [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
-  
+
+
 ; evaluate the list of operands, putting results into a list
 
 (define eval-rands
   (lambda (rands env)
     (map (lambda (exp) (eval-exp exp env)) rands)))
 
+
 ; evalute a list of expressions in order, returning the last
 
 (define eval-bodies
   (lambda (bodies env)
-    (if (null? (cdr bodies)) 
+    (if (null? (cdr bodies))
       (eval-exp (car bodies) env)
       (begin (eval-exp (car bodies) env)
         (eval-bodies (cdr bodies) env)))))
+
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.
@@ -355,14 +360,13 @@
   (lambda (proc-value args)
     (cases proc-val proc-value
       [prim-proc (op) (apply-prim-proc op args)]
+      [closure (symbols bodies env)
+               (eval-bodies bodies (extend-env symbols args env))]
 			; You will add other cases
       [else (eopl:error 'apply-proc
                    "Attempt to apply bad procedure: ~s"
                     proc-value)])))
 
-(define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr list null? assq eq?
-                            equal? atom? length list->vector list? pair? procedure? vector->list vector 
-                            vector-set! display newline cadr cdar caar cddr caaar caadr cadar cdaar caddr cdadr cddar cdddr))
 
 (define global-env         ; for now, our initial global environment only contains
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -371,44 +375,56 @@
           *prim-proc-names*)
      (empty-env)))
 
+
 ; Usually an interpreter must define each
 ; built-in procedure individually.  We are "cheating" a little bit.
 
+(define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr list null? assq eq?
+                              equal? atom? length list->vector list? pair? procedure? vector->list vector
+                              vector-set! display newline cadr cdar caar cddr caaar caadr cadar cdaar
+                              caddr cdadr cddar cdddr make-vector vector-ref set-car! set-cdr! vector?
+                              number? symbol?))
+
+
 (define apply-prim-proc
-  (trace-lambda apply-prim-proc (prim-proc args)
+  (lambda (prim-proc args)
     (case prim-proc
-      [(+) (apply + args)]
+      [(+) (apply + args)] ; numerical procedures
       [(-) (apply - args)]
       [(*) (apply * args)]
       [(/) (apply / args)]
       [(add1) (apply add1 args)]
-      [(sub1) (apply sub1 args)] 
-      [(zero?) (apply zero? args)]
+      [(sub1) (apply sub1 args)]
       [(=) (apply = args)]
       [(<) (apply < args)]
       [(<=) (apply <= args)]
       [(>) (apply > args)]
       [(>=) (apply >= args)]
       [(not) (apply not args)]
-      [(cons) (apply cons args)]
-      [(car) (apply car args)]
-      [(cdr) (apply cdr args)]
+      [(cons) (apply cons args)] ; list procedures
       [(list) (apply list args)]
-      [(null?) (apply null? args)]
       [(assq) (apply assq args)]
-      [(eq?) (apply eq? args)]
-      [(equal?) (apply equal? args)]
-      [(atom?) (apply atom? args)]
       [(length) (apply length args)]
-      [(list->vector) (apply list->vector args)]
-      [(list?) (apply list? args)]
-      [(pair?) (apply pair? args)]
-      [(procedure?) (if (= 1 (length args)) (proc-val? (car args)) (error 'apply-prim-proc "Incorrect number of arguments to procedure procedure?"))]
+      [(list->vector) (apply list->vector args)] ; vector stuff
+      (make-vector (apply make-vector args))
+      (vector-ref (apply vector-ref args))
       [(vector->list) (apply vector->list args)]
       [(vector) (apply vector args)]
-      [(vector-set!) (apply vector-set! args)]
-      [(display) (apply display args)]
-      [(newline) (apply newline args)]
+      (vector? (apply vector? args)) ; predicates
+      (number? (apply number? args))
+      (symbol? (apply symbol? args))
+      [(zero?) (apply zero? args)]
+      [(null?) (apply null? args)]
+      [(atom?) (apply atom? args)]
+      [(procedure?) (if (= 1 (length args))
+                        (proc-val? (car args))
+                        (error 'apply-prim-proc "Incorrect number of arguments to procedure procedure?"))]
+      [(list?) (apply list? args)]
+      [(pair?) (apply pair? args)]
+      [(eq?) (apply eq? args)]
+      [(equal?) (apply equal? args)]
+      [(car) (apply car args)] ; car/cdr procedures
+      [(cdr) (apply cdr args)]
       [(cadr) (apply cadr args)]
       [(cdar) (apply cdar args)]
       [(caar) (apply caar args)]
@@ -421,6 +437,11 @@
       [(cdadr) (apply cdadr args)]
       [(cddar) (apply cddar args)]
       [(cdddr) (apply cdddr args)]
+      [(vector-set!) (apply vector-set! args)] ; mutation procedures
+      (set-car! (apply set-car! args))
+      (set-cdr! (apply set-cdr! args))
+      [(display) (apply display args)] ; printing procedures
+      [(newline) (apply newline args)]
       [else (error 'apply-prim-proc
             "Bad primitive procedure name: ~s"
             prim-proc)])))
