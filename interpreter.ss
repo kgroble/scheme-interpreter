@@ -348,7 +348,9 @@
                    "Attempt to apply bad procedure: ~s"
                     proc-value)])))
 
-(define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr list null? assq))
+(define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr list null? assq eq?
+                            equal? atom? length list->vector list? pair? procedure? vector->list vector 
+                            vector-set! display newline cadr cdar caar cddr caaar caadr cadar cdaar caddr cdadr cddar cdddr))
 
 (define global-env         ; for now, our initial global environment only contains
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -361,7 +363,7 @@
 ; built-in procedure individually.  We are "cheating" a little bit.
 
 (define apply-prim-proc
-  (lambda (prim-proc args)
+  (trace-lambda apply-prim-proc (prim-proc args)
     (case prim-proc
       [(+) (apply + args)]
       [(-) (apply - args)]
@@ -382,6 +384,31 @@
       [(list) (apply list args)]
       [(null?) (apply null? args)]
       [(assq) (apply assq args)]
+      [(eq?) (apply eq? args)]
+      [(equal?) (apply equal? args)]
+      [(atom?) (apply atom? args)]
+      [(length) (apply length args)]
+      [(list->vector) (apply list->vector args)]
+      [(list?) (apply list? args)]
+      [(pair?) (apply pair? args)]
+      [(procedure?) (if (= 1 (length args)) (proc-val? (car args)) (error 'apply-prim-proc "Incorrect number of arguments to procedure procedure?"))]
+      [(vector->list) (apply vector->list args)]
+      [(vector) (apply vector args)]
+      [(vector-set!) (apply vector-set! args)]
+      [(display) (apply display args)]
+      [(newline) (apply newline args)]
+      [(cadr) (apply cadr args)]
+      [(cdar) (apply cdar args)]
+      [(caar) (apply caar args)]
+      [(cddr) (apply cddr args)]
+      [(caaar) (apply caaar args)]
+      [(caadr) (apply caadr args)]
+      [(cadar) (apply cadar args)]
+      [(cdaar) (apply cdaar args)]
+      [(caddr) (apply caddr args)]
+      [(cdadr) (apply cdadr args)]
+      [(cddar) (apply cddar args)]
+      [(cdddr) (apply cdddr args)]
       [else (error 'apply-prim-proc
             "Bad primitive procedure name: ~s"
             prim-proc)])))
