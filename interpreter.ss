@@ -30,17 +30,21 @@
     (id symbol?)
     (body expression?)]
   [let-exp
-    (binds (list-of (lambda (x) (and (symbol? (car x)) (expression? (cadr x))))))
+    (vars (list-of symbol?))
+    (vals (list-of expression?))
     (bodies (list-of expression?))]
   [let*-exp
-    (binds (list-of (lambda (x) (and (symbol? (car x)) (expression? (cadr x))))))
+    (vars (list-of symbol?))
+    (vals (list-of expression?))
     (bodies (list-of expression?))]
   [letrec-exp
-    (binds (list-of (lambda (x) (and (symbol? (car x)) (expression? (cadr x))))))
+    (vars (list-of symbol?))
+    (vals (list-of expression?))
     (bodies (list-of expression?))]
   [named-let-exp
     (name symbol?)
-    (binds (list-of (lambda (x) (and (symbol? (car x)) (expression? (cadr x))))))
+    (vars (list-of symbol?))
+    (vals (list-of expression?))
     (bodies (list-of expression?))]
   [lambda-exp
     (ids (list-of symbol?))
@@ -131,13 +135,12 @@
             (if (not (and 
               (list? (3rd datum))
               (andmap (lambda (x) 
-                (and (list? x) (= 2 (length x)) (symbol? (car x)))) (4rd datum))))
+                (and (list? x) (= 2 (length x)) (symbol? (car x)))) (3rd datum))))
               (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
             (named-let-exp
               (2nd datum)
-              (map (lambda (pair)
-                  (list (car pair) (parse-exp (cadr pair))))
-                (3rd datum))
+              (map car (3rd datum))
+              (map (lambda (x) (parse-exp (cadr x))) (3rd datum))
               (map parse-exp (cdddr datum)))]
           [else
             (if (not (and 
@@ -146,9 +149,8 @@
                 (and (list? x) (= 2 (length x)) (symbol? (car x)))) (2nd datum))))
               (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
             (let-exp 
-              (map (lambda (pair)
-                  (list (car pair) (parse-exp (cadr pair))))
-                (2nd datum))
+              (map car (2nd datum))
+              (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
               (map parse-exp (cddr datum)))])]
       [(eqv? (car datum) 'let*)
         (if (< (length datum) 3)
@@ -159,9 +161,8 @@
             (and (list? x) (= 2 (length x)) (symbol? (car x)))) (2nd datum))))
           (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
         (let*-exp 
-          (map (lambda (pair)
-              (list (car pair) (parse-exp (cadr pair))))
-            (2nd datum))
+          (map car (2nd datum))
+          (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
           (map parse-exp (cddr datum)))]
       [(eqv? (car datum) 'letrec)
         (if (< (length datum) 3)
@@ -172,9 +173,8 @@
             (and (list? x) (= 2 (length x)) (symbol? (car x)))) (2nd datum))))
           (eopl:error 'parse-exp "bad let bindings in expression: ~s" datum))
         (letrec-exp 
-          (map (lambda (pair)
-              (list (car pair) (parse-exp (cadr pair))))
-            (2nd datum))
+          (map car (2nd datum))
+          (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
           (map parse-exp (cddr datum)))]
       [(eq? (car datum) 'quote)
         (lit-exp (cadr datum))]
@@ -315,6 +315,9 @@
                 (if (eval-exp conditional-exp env)
                   (eval-exp then-exp env)
                   (eval-exp else-exp env))]
+               [let-exp (vars vals bodies)
+                (let ((new-env (extend-env vars (eval-rands vals env) env)))
+                  (eval-bodies bodies new-env))]
                [var-exp (id)
                         (apply-env env id ; look up its value.
                          identity-proc ; procedure to call if id is in the environment
@@ -334,6 +337,15 @@
 (define eval-rands
   (lambda (rands env)
     (map (lambda (exp) (eval-exp exp env)) rands)))
+
+; evalute a list of expressions in order, returning the last
+
+(define eval-bodies
+  (lambda (bodies env)
+    (if (null? (cdr bodies)) 
+      (eval-exp (car bodies) env)
+      (begin (eval-exp (car bodies) env)
+        (eval-bodies (cdr bodies) env)))))
 
 ;  Apply a procedure to its arguments.
 ;  At this point, we only have primitive procedures.
