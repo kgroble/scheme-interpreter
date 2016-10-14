@@ -368,14 +368,6 @@
                     proc-value)])))
 
 
-(define global-env         ; for now, our initial global environment only contains
-  (extend-env            ; procedure names.  Recall that an environment associates
-     *prim-proc-names*   ;  a value (not an expression) with an identifier.
-     (map prim-proc
-          *prim-proc-names*)
-     (empty-env)))
-
-
 ; Usually an interpreter must define each
 ; built-in procedure individually.  We are "cheating" a little bit.
 
@@ -384,6 +376,13 @@
                               vector-set! display newline cadr cdar caar cddr caaar caadr cadar cdaar
                               caddr cdadr cddar cdddr make-vector vector-ref set-car! set-cdr! vector?
                               number? symbol?))
+
+(define global-env         ; for now, our initial global environment only contains
+  (extend-env            ; procedure names.  Recall that an environment associates
+     *prim-proc-names*   ;  a value (not an expression) with an identifier.
+     (map prim-proc
+          *prim-proc-names*)
+     (empty-env)))
 
 
 (define apply-prim-proc
@@ -451,8 +450,17 @@
     (display "--> ")
     ;; notice that we don't save changes to the environment...
     (let ([answer (top-level-eval (parse-exp (read)))])
-      ;; TODO: are there answers that should display differently?
-      (eopl:pretty-print answer) (newline)
+      (cond
+        [(eq? (void) answer)
+          (newline)]
+        [(proc-val? answer)
+          (cases proc-val answer
+            [prim-proc (op) 
+              (display "#<procedure ") (display op) (display ">")
+              (newline) (newline)]
+            [else
+              (display "#<procedure>") (newline) (newline)])]
+        [else (eopl:pretty-print answer) (newline)])
       (rep))))  ; tail-recursive, so stack doesn't grow.
 
 (define eval-one-exp
