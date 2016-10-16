@@ -100,11 +100,13 @@
 
   [case-exp ; a nightmare
    (exp expression?)
-   (keys (list-of (list-of (lambda (x)
-                             (or (symbol? x)
-                                 (number? x))))))
+   (keys (list-of (list-of (lambda (x) (or (number? x) (symbol? x))))))
    (results (list-of (list-of expression?)))
-   (else-result (list-of expression?))])
+   (else-result (list-of expression?))]
+
+   [while-exp
+    (condition expression?)
+    (bodies (list-of expression?))])
 
 
 
@@ -150,25 +152,16 @@
   (lambda (datum conditionals list-of-bodies)
     (cond
      [(null? datum)
-      (list conditionals list-of-bodies '())]
+      (list (reverse conditionals) (reverse list-of-bodies) '())]
      [(eqv? 'else (caar datum))
-      (list conditionals list-of-bodies (cdar datum))]
+      (list (reverse conditionals) (reverse list-of-bodies) (cdar datum))]
      [else
       (process-cond (cdr datum)
                     (cons (caar datum) conditionals)
                     (cons (cdar datum) list-of-bodies))])))
 
 
-;;(define process-case
-  ;;(lambda (datum list-of-keys list-of-bodies)
-    ;;(cond
-     ;;[(null? datum)
-      ;;(list list-of-keys list-of-bodies '())]
-     ;;[(eqv? 'else (caar datum))
-      ;;(list list-of-keys list-of-bodies (cdar datum))]
-     ;;[else
-      ;;(process-case (cdr datum)
-                    ;;(cons (caar datum
+(define process-case process-cond)
 
 
 (define parse-exp
@@ -224,14 +217,15 @@
 
        ;; TODO FIX THIS
        [(eqv? 'case (car datum)) ; case
-        (let ((processed-cond (process-cond (cdr datum) '() '())))
-          (case-exp (map parse-exp (car processed-cond))
+        (let ((processed-case (process-case (cddr datum) '() '())))
+          (case-exp (parse-exp (cadr datum))
+                    (car processed-case)
                     (map (lambda (list-of-bodies)
                            (map parse-exp list-of-bodies))
-                         (cadr processed-cond))
-                    (if (null? (caddr processed-cond))
+                         (cadr processed-case))
+                    (if (null? (caddr processed-case))
                         (list (parse-exp '(void)))
-                        (map parse-exp (caddr processed-cond)))))]
+                        (map parse-exp (caddr processed-case)))))]
 
 
        [(eqv? 'cond (car datum)) ; cond
@@ -302,16 +296,21 @@
             (map car (2nd datum))
             (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
             (map parse-exp (cddr datum)))]
-
-      [(eq? (car datum) 'quote) ; literal expression
-        (lit-exp (cadr datum))]
-
-      [else ; application expression
-        (if (not (list? (cdr datum)))
-          (eopl:error 'parse-exp "bad argument list in application: ~s" datum))
-        (app-exp (parse-exp (1st datum))
-        (map parse-exp (cdr datum)))])]
-
+    
+          [(eqv? (car datum) 'while)
+            (while-exp
+              (parse-exp (2nd datum))
+              (map parse-exp (cddr datum)))]
+    
+          [(eq? (car datum) 'quote) ; literal expression
+            (lit-exp (cadr datum))]
+    
+          [else ; application expression
+            (if (not (list? (cdr datum)))
+              (eopl:error 'parse-exp "bad argument list in application: ~s" datum))
+            (app-exp (parse-exp (1st datum))
+             (map parse-exp (cdr datum)))])]
+    
      [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
 
@@ -420,9 +419,16 @@
            [begin-exp (bodies)
                       (app-exp (lambda-exp '() bodies) '())]
 
-           ;;[case-exp (list-of-keys list-of-bodies else-exps)
-                     ;;(syntax-expand
-                      ;;(
+           [case-exp (exp list-of-keys list-of-bodies else-exps)
+                     (syntax-expand
+                      (if (null? list-of-keys)
+                        (begin-exp else-exps)
+                        (if-else-exp (app-exp (var-exp 'member?) (list exp (lit-exp (car list-of-keys))))
+                                     (begin-exp (car list-of-bodies))
+                                     (case-exp exp
+                                               (cdr list-of-keys)
+                                               (cdr list-of-bodies)
+                                               else-exps))))]
 
 
 
@@ -457,6 +463,10 @@
            ;; letrec
 
            ;; named-let
+
+           [while-exp (test bodies)
+                      (while-exp (syntax-expand test)
+                                 (map syntax-expand bodies))]
 
            [lambda-exp (ids bodies)
                        (lambda-exp ids
@@ -518,6 +528,9 @@
                [let-exp (vars vals bodies)
                 (let ((new-env (extend-env vars (eval-rands vals env) env)))
                   (eval-bodies bodies new-env))]
+               [while-exp (test bodies)
+                          (if (eval-exp test env)
+                              (begin (eval-bodies bodies env) (eval-exp exp env)))]
                [var-exp (id)
                         (apply-env env id ; look up its value.
                          identity-proc ; procedure to call if id is in the environment
@@ -585,7 +598,7 @@
 ; Usually an interpreter must define each
 ; built-in procedure individually.  We are "cheating" a little bit.
 
-(define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr
+(define *prim-proc-names* '(+ - * / quotient add1 sub1 zero? = < <= > >= not cons car cdr
                               list null? assq eq? equal? atom? length list->vector list? pair? map apply
                               procedure? vector->list vector vector-set! display newline cadr cdar caar cddr
                               caaar caadr cadar cdaar caddr cdadr cddar cdddr make-vector vector-ref set-car!
@@ -608,6 +621,7 @@
       [(-) (apply - args)]
       [(*) (apply * args)]
       [(/) (apply / args)]
+      [(quotient) (apply quotient args)]
       [(add1) (apply add1 args)]
       [(sub1) (apply sub1 args)]
       [(=) (apply = args)]
@@ -622,10 +636,10 @@
       [(length) (apply length args)]
       [(list->vector) (apply list->vector args)] ; vector stuff
       [(make-vector) (apply make-vector args)]
-      [(vector-ref) (apply vector-ref args)]
+      [(vector-ref) (apply vector-ref args)]f
       [(vector->list) (apply vector->list args)]
       [(vector) (apply vector args)]
-      [(vector?_) (apply vector? args)] ; predicates
+      [(vector?) (apply vector? args)] ; predicates
       [(number?) (apply number? args)]
       [(symbol?) (apply symbol? args)]
       [(zero?) (apply zero? args)]

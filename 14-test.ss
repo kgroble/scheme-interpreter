@@ -187,7 +187,6 @@
 	     (eq? (void) 
 		  (eval-one-exp '(cond [(< 3 3) "this is false"] 
 				       [(< 2 2) "this is false" ])))
-      '
 	     )])
       (display-results correct answers equal?)))
 
