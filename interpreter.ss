@@ -11,6 +11,16 @@
 
 ; parsed expression
 
+(define (improper? x)
+  (and (pair? x) (not (list? (cdr x)))))
+
+(define (improper-symbols? x)
+  (if (pair? x)
+    (if (pair? (cdr x))
+      (and (symbol? (car x)) (improper-symbols? (cdr x)))
+      (and (symbol? (car x)) (symbol? (cdr x))))
+    #f))
+
 (define-datatype expression expression?
   [var-exp ; var expression
     (id symbol?)]
@@ -66,7 +76,11 @@
   [closure
    (vars (list-of symbol?))
    (bodies (list-of expression?))
-   (env (list-of pair?))])
+   (env (list-of pair?))]
+  [closure-variable
+    (vars (lambda (x) (or (symbol? x) (improper? x))))
+    (bodies (list-of expression?))
+    (env (list-of pair?))])
 
 
 
@@ -309,14 +323,17 @@
     (lambda (exp env)
         (cases expression exp
                [lit-exp (datum) datum]
+               [if-exp (conditional-exp then-exp)
+                (if (eval-exp conditional-exp env)
+                  (eval-exp then-exp env))]
                [if-else-exp (conditional-exp then-exp else-exp)
                 (if (eval-exp conditional-exp env)
                   (eval-exp then-exp env)
                   (eval-exp else-exp env))]
-
                [lambda-exp (vars bodies)
                            (closure vars bodies env)]
-
+               [lambda-variable-exp (vars bodies)
+                (closure-variable vars bodies env)]
                [let-exp (vars vals bodies)
                 (let ((new-env (extend-env vars (eval-rands vals env) env)))
                   (eval-bodies bodies new-env))]
@@ -362,17 +379,33 @@
       [prim-proc (op) (apply-prim-proc op args)]
       [closure (symbols bodies env)
                (eval-bodies bodies (extend-env symbols args env))]
+      [closure-variable (symbols bodies env)
+        (eval-bodies bodies (extend-env 
+                              (to-proper symbols)
+                              (convert-variable-args symbols args)
+                              env))]
 			; You will add other cases
       [else (eopl:error 'apply-proc
                    "Attempt to apply bad procedure: ~s"
                     proc-value)])))
 
+(define to-proper
+  (lambda (symbols)
+    (if (symbol? symbols)
+      (list symbols)
+      (cons (car symbols) (to-proper (cdr symbols))))))
+
+(define convert-variable-args
+  (lambda (symbols args)
+    (if (symbol? symbols)
+      (list args)
+      (cons (car args) (convert-variable-args (cdr symbols) (cdr args))))))
 
 ; Usually an interpreter must define each
 ; built-in procedure individually.  We are "cheating" a little bit.
 
 (define *prim-proc-names* '(+ - * / add1 sub1 zero? = < <= > >= not cons car cdr list null? assq eq?
-                              equal? atom? length list->vector list? pair? procedure? vector->list vector
+                              equal? atom? length list->vector list? pair? map apply procedure? vector->list vector
                               vector-set! display newline cadr cdar caar cddr caaar caadr cadar cdaar
                               caddr cdadr cddar cdddr make-vector vector-ref set-car! set-cdr! vector?
                               number? symbol?))
@@ -386,7 +419,7 @@
 
 
 (define apply-prim-proc
-  (lambda (prim-proc args)
+  (trace-lambda apply-prim-proc (prim-proc args)
     (case prim-proc
       [(+) (apply + args)] ; numerical procedures
       [(-) (apply - args)]
@@ -418,6 +451,9 @@
       [(procedure?) (if (= 1 (length args))
                         (proc-val? (car args))
                         (error 'apply-prim-proc "Incorrect number of arguments to procedure procedure?"))]
+      [(map) (apply map (lambda col-of-args
+                    (apply-proc (car args) col-of-args)) (cdr args))]
+      [(apply) (apply-proc (car args) (flatten (cdr args)))]
       [(list?) (apply list? args)]
       [(pair?) (apply pair? args)]
       [(eq?) (apply eq? args)]
@@ -444,6 +480,13 @@
       [else (error 'apply-prim-proc
             "Bad primitive procedure name: ~s"
             prim-proc)])))
+
+(define flatten
+  (lambda (ls)
+    (cond
+      [(null? ls) '()]
+      [(null? (cdr ls)) (car ls)]
+      [else (cons (car ls) (flatten (cdr ls)))])))
 
 (define rep      ; "read-eval-print" loop.
   (lambda ()
