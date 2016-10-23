@@ -296,21 +296,21 @@
             (map car (2nd datum))
             (map (lambda (x) (parse-exp (cadr x))) (2nd datum))
             (map parse-exp (cddr datum)))]
-    
+
           [(eqv? (car datum) 'while)
             (while-exp
               (parse-exp (2nd datum))
               (map parse-exp (cddr datum)))]
-    
+
           [(eq? (car datum) 'quote) ; literal expression
             (lit-exp (cadr datum))]
-    
+
           [else ; application expression
             (if (not (list? (cdr datum)))
               (eopl:error 'parse-exp "bad argument list in application: ~s" datum))
             (app-exp (parse-exp (1st datum))
              (map parse-exp (cdr datum)))])]
-    
+
      [else (eopl:error 'parse-exp "bad expression: ~s" datum)])))
 
 
@@ -345,8 +345,8 @@
 
 (define extend-env-recursively
   (lambda (symbols expressions env)
-    (let* ((len (length symbols)) 
-           (new-env (extend-env symbols (make-list len 'this-should-go-away) env)) 
+    (let* ((len (length symbols))
+           (new-env (extend-env symbols (make-list len 'this-should-go-away) env))
            (vec (cdar new-env)))
           (for-each
             (lambda (pos exp)
@@ -464,6 +464,11 @@
                      (lambda-exp vars (map syntax-expand bodies))
                      (map syntax-expand vals))]
 
+           [letrec-exp (vars vals bodies)
+                       (letrec-exp vars
+                                   (map syntax-expand vals)
+                                   (map syntax-expand bodies))]
+
            [let*-exp (vars vals bodies)
                      (syntax-expand (let-exp (list (car vars))
                                              (list (car vals))
@@ -473,9 +478,13 @@
                                                                  (cdr vals)
                                                                  bodies)))))]
 
-           ;; letrec
+           [named-let-exp (name vars vals bodies)
+                          (syntax-expand (app-exp
+                                          (letrec-exp (list name)
+                                                      (list (lambda-exp vars bodies))
+                                                      (list (var-exp name)))
+                                          vals))]
 
-           ;; named-let
 
            [while-exp (test bodies)
                       (while-exp (syntax-expand test)
@@ -615,7 +624,7 @@
                               list null? assq eq? equal? atom? length list->vector list? pair? map apply
                               procedure? vector->list vector vector-set! display newline cadr cdar caar cddr
                               caaar caadr cadar cdaar caddr cdadr cddar cdddr make-vector vector-ref set-car!
-                              set-cdr! vector? number? symbol? exit void member?))
+                              set-cdr! vector? number? symbol? exit void member? append eqv? list-tail))
 
 (define global-env         ; for now, our initial global environment only contains
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -645,6 +654,8 @@
       [(not) (apply not args)]
       [(cons) (apply cons args)] ; list procedures
       [(list) (apply list args)]
+      [(append) (apply append args)]
+      [(list-tail) (apply list-tail args)]
       [(assq) (apply assq args)]
       [(length) (apply length args)]
       [(list->vector) (apply list->vector args)] ; vector stuff
@@ -667,6 +678,7 @@
       [(list?) (apply list? args)]
       [(pair?) (apply pair? args)]
       [(eq?) (apply eq? args)]
+      [(eqv?) (apply eqv? args)]
       [(equal?) (apply equal? args)]
       [(member?) (not (not (apply member args)))]
       [(car) (apply car args)] ; car/cdr procedures
