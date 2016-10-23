@@ -343,6 +343,19 @@
                 (list->vector values))
           env)))
 
+(define extend-env-recursively
+  (lambda (symbols expressions env)
+    (let* ((len (length symbols)) 
+           (new-env (extend-env symbols (make-list len 'this-should-go-away) env)) 
+           (vec (cdar new-env)))
+          (for-each
+            (lambda (pos exp)
+              (vector-set! vec
+                           pos
+                           (eval-exp exp new-env)))
+            (iota len)
+            expressions)
+          new-env)))
 
 (define apply-env
   (lambda (env symbol success fail)
@@ -525,8 +538,8 @@
                            (closure vars bodies env)]
                [lambda-variable-exp (vars bodies)
                 (closure-variable vars bodies env)]
-               [let-exp (vars vals bodies)
-                (let ((new-env (extend-env vars (eval-rands vals env) env)))
+               [letrec-exp (vars vals bodies)
+                (let ((new-env (extend-env-recursively vars vals env)))
                   (eval-bodies bodies new-env))]
                [while-exp (test bodies)
                           (if (eval-exp test env)
@@ -636,7 +649,7 @@
       [(length) (apply length args)]
       [(list->vector) (apply list->vector args)] ; vector stuff
       [(make-vector) (apply make-vector args)]
-      [(vector-ref) (apply vector-ref args)]f
+      [(vector-ref) (apply vector-ref args)]
       [(vector->list) (apply vector->list args)]
       [(vector) (apply vector args)]
       [(vector?) (apply vector? args)] ; predicates
