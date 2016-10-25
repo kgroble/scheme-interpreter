@@ -104,6 +104,10 @@
    (results (list-of (list-of expression?)))
    (else-result (list-of expression?))]
 
+  [when-exp
+   (test expression?)
+   (bodies (list-of expression?))]
+
    [while-exp
     (condition expression?)
     (bodies (list-of expression?))])
@@ -302,6 +306,11 @@
               (parse-exp (2nd datum))
               (map parse-exp (cddr datum)))]
 
+          [(eqv? (car datum) 'when)
+           (when-exp
+            (parse-exp (cadr datum))
+            (map parse-exp (cddr datum)))]
+
           [(eq? (car datum) 'quote) ; literal expression
             (lit-exp (cadr datum))]
 
@@ -490,6 +499,10 @@
                       (while-exp (syntax-expand test)
                                  (map syntax-expand bodies))]
 
+           [when-exp (test bodies)
+                     (syntax-expand (if-exp (syntax-expand test)
+                                            (begin-exp bodies)))]
+
            [lambda-exp (ids bodies)
                        (lambda-exp ids
                                    (map syntax-expand bodies))]
@@ -536,23 +549,30 @@
     (lambda (exp env)
         (cases expression exp
                [lit-exp (datum) datum]
+
                [if-exp (conditional-exp then-exp)
                 (if (eval-exp conditional-exp env)
                   (eval-exp then-exp env))]
+
                [if-else-exp (conditional-exp then-exp else-exp)
                 (if (eval-exp conditional-exp env)
                   (eval-exp then-exp env)
                   (eval-exp else-exp env))]
+
                [lambda-exp (vars bodies)
                            (closure vars bodies env)]
+
                [lambda-variable-exp (vars bodies)
                 (closure-variable vars bodies env)]
+
                [letrec-exp (vars vals bodies)
                 (let ((new-env (extend-env-recursively vars vals env)))
                   (eval-bodies bodies new-env))]
+
                [while-exp (test bodies)
                           (if (eval-exp test env)
                               (begin (eval-bodies bodies env) (eval-exp exp env)))]
+
                [var-exp (id)
                         (apply-env env id ; look up its value.
                          identity-proc ; procedure to call if id is in the environment
@@ -561,10 +581,12 @@
                             identity-proc
                             (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
                                                 "variable not found in environment: ~s" id)))))]
+
                [app-exp (rator rands)
                         (let ([proc-value (eval-exp rator env)]
                               [args (eval-rands rands env)])
                           (apply-proc proc-value args))]
+
                [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 
