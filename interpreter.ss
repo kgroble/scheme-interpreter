@@ -80,6 +80,9 @@
     (ids (lambda (x) (or (symbol? x) (improper? x))))
     (bodies (list-of expression?))]
 
+  [case-lambda-exp
+   (lambda-bodies (list-of expression?))] ;**
+
   [app-exp ; application expression
     (rator expression?)
     (rands (list-of expression?))]
@@ -129,7 +132,9 @@
   [closure-variable
     (vars (lambda (x) (or (symbol? x) (improper? x))))
     (bodies (list-of expression?))
-    (env (list-of pair?))])
+    (env (list-of pair?))]
+  [case-closure
+   (closures list?)])
 
 
 
@@ -230,6 +235,15 @@
                     (if (null? (caddr processed-case))
                         (list (parse-exp '(void)))
                         (map parse-exp (caddr processed-case)))))]
+
+       [(eqv? 'case-lambda (car datum)) ;**
+        (case-lambda-exp (map (lambda (case-body)
+                                ((if (or (symbol? (car case-body)) (improper? (car case-body)))
+                                     lambda-variable-exp
+                                     lambda-exp)
+                                 (car case-body)
+                                 (map parse-exp (cdr case-body))))
+                              (cdr datum)))]
 
 
        [(eqv? 'cond (car datum)) ; cond
@@ -507,6 +521,9 @@
                        (lambda-exp ids
                                    (map syntax-expand bodies))]
 
+           [case-lambda-exp (bodies) ;**
+                            (case-lambda-exp (map syntax-expand bodies))]
+
            [lambda-variable-exp (ids bodies)
                                 (lambda-variable-exp ids
                                                      (map syntax-expand bodies))]
@@ -565,6 +582,13 @@
                [lambda-variable-exp (vars bodies)
                 (closure-variable vars bodies env)]
 
+               [case-lambda-exp (bodies) ;**
+                                (case-closure (map (lambda (body)
+                                                     (eval-exp body env))
+                                                   bodies))]
+
+
+
                [letrec-exp (vars vals bodies)
                 (let ((new-env (extend-env-recursively vars vals env)))
                   (eval-bodies bodies new-env))]
@@ -611,17 +635,65 @@
 ;  At this point, we only have primitive procedures.
 ;  User-defined procedures will be added later.
 
+(define match-args? ;**
+  (lambda (param-list n)
+    (cond [(and (null? param-list) (zero? n))
+           #t]
+          [(null? param-list)
+           #f]
+          [(symbol? param-list)
+           (if (>= n 0)
+               #t
+               #f)]
+          [else
+           (match-args? (cdr param-list)
+                        (- n 1))])))
+
+(define improper-length
+  (lambda (ls)
+    (if (or (null? ls) (symbol? ls))
+        0
+        (+ 1 (improper-length (cdr ls))))))
+
+
 (define apply-proc
   (lambda (proc-value args)
     (cases proc-val proc-value
+
       [prim-proc (op) (apply-prim-proc op args)]
+
       [closure (symbols bodies env)
                (eval-bodies bodies (extend-env symbols args env))]
+
       [closure-variable (symbols bodies env)
         (eval-bodies bodies (extend-env
                               (to-proper symbols)
                               (convert-variable-args symbols args)
                               env))]
+
+      [case-closure (closures) ;**
+                    (let find-matching-args ((closures closures))
+                      (if (null? closures)
+                          (eopl:error 'apply-proc "Wrong number of args")
+                          (cases proc-val (car closures)
+
+                                 [closure (symbols bodies env)
+                                          (if (match-args? symbols (length args))
+                                              (eval-bodies bodies (extend-env symbols args env))
+                                              (find-matching-args (cdr closures)))]
+
+                                 [closure-variable (symbols bodies env)
+                                                   (if (match-args? symbols (length args))
+                                                       (eval-bodies bodies
+                                                                    (extend-env (to-proper symbols)
+                                                                                (convert-variable-args symbols args)
+                                                                                env))
+                                                       (find-matching-args (cdr closures)))]
+
+                                 [else eopl:error 'apply-proc "???"])))]
+
+
+
 			; You will add other cases
       [else (eopl:error 'apply-proc
                    "Attempt to apply bad procedure: ~s"
@@ -646,7 +718,7 @@
                               list null? assq eq? equal? atom? length list->vector list? pair? map apply
                               procedure? vector->list vector vector-set! display newline cadr cdar caar cddr
                               caaar caadr cadar cdaar caddr cdadr cddar cdddr make-vector vector-ref set-car!
-                              set-cdr! vector? number? symbol? exit void member? append eqv? list-tail))
+                              set-cdr! vector? number? symbol? exit void member? append eqv? list-tail odd?))
 
 (define global-env         ; for now, our initial global environment only contains
   (extend-env            ; procedure names.  Recall that an environment associates
@@ -689,6 +761,7 @@
       [(number?) (apply number? args)]
       [(symbol?) (apply symbol? args)]
       [(zero?) (apply zero? args)]
+      [(odd?) (apply odd? args)]
       [(null?) (apply null? args)]
       [(atom?) (apply atom? args)]
       [(procedure?) (if (= 1 (length args))
