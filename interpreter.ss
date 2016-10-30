@@ -51,6 +51,10 @@
     (id symbol?)
     (body expression?)]
 
+  [define-exp ; define expression
+    (id symbol?)
+    (body expression?)]
+
   [let-exp ; let expressions
     (vars (list-of symbol?))
     (vals (list-of expression?))
@@ -127,6 +131,35 @@
     (bodies (list-of expression?))
     (env (list-of pair?))])
 
+(define-datatype reference reference?
+  [ref
+    (vector vector?)
+    (index integer?)])
+
+(define deref
+  (lambda (r)
+    (cases reference r
+      [ref (vec i)
+           (vector-ref vec i)])))
+
+(define set-ref!
+  (lambda (r val)
+    (cases reference r
+      [ref (vec i)
+           (vector-set! vec i val)])))
+
+
+(define apply-env-ref
+  (lambda (env symbol success fail)
+    (if (null? env)
+        (fail)
+        (let ([symbols (caar env)]
+              [values (cdar env)]
+              [enclosing-env (cdr env)])
+          (let ([pos (rib-find-position symbol symbols)])
+            (if (number? pos)
+                (success (ref values pos))
+                (apply-env-ref enclosing-env symbol success fail)))))))
 
 
 ;-------------------+
@@ -244,6 +277,13 @@
            (if (not (symbol? (2nd datum)))
                (eopl:error 'parse-exp "must set a symbol in set! expression: ~s" datum))
            (set-exp (2nd datum) (parse-exp (3rd datum)))]
+
+          [(eqv? (car datum) 'define) ; define
+           (if (not (= 3 (length datum)))
+               (eopl:error 'parse-exp "incorrect length in define expression: ~s" datum))
+           (if (not (symbol? (2nd datum)))
+               (eopl:error 'parse-exp "must set a symbol in define expression: ~s" datum))
+           (define-exp (2nd datum) (parse-exp (3rd datum)))]
 
           [(eqv? (car datum) 'let) ; let expression
            (cond
@@ -407,9 +447,12 @@
            [or-exp (bodies)
                    (if (null? bodies)
                        (lit-exp #f)
-                       (syntax-expand (if-else-exp (car bodies)
-                                                   (car bodies)
-                                                   (or-exp (cdr bodies)))))]
+                       (let ((sym (gensym)))
+                            (syntax-expand (let-exp (list sym)
+                                           (list (car bodies))
+                                           (list (if-else-exp (var-exp sym) 
+                                                              (var-exp sym)
+                                                              (or-exp (cdr bodies))))))))]
 
            [and-exp (bodies)
                     (if (null? bodies)
@@ -430,7 +473,7 @@
                                      (syntax-expand else-body))]
 
            [begin-exp (bodies)
-                      (app-exp (lambda-exp '() bodies) '())]
+                      (syntax-expand (app-exp (lambda-exp '() bodies) '()))]
 
            [case-exp (exp list-of-keys list-of-bodies else-exps)
                      (syntax-expand
@@ -458,6 +501,10 @@
            [set-exp (id body)
                     (set-exp id
                              (syntax-expand body))]
+
+           [define-exp (id body)
+                    (define-exp id
+                             (syntax-expand body))]      
 
            [let-exp (vars vals bodies)
                     (app-exp
@@ -543,6 +590,20 @@
                 (if (eval-exp conditional-exp env)
                   (eval-exp then-exp env)
                   (eval-exp else-exp env))]
+               [set-exp (id body)
+                        (set-ref! (apply-env-ref env id
+                                                 identity-proc
+                                                 (lambda ()
+                                                  (apply-env-ref global-env id
+                                                                 identity-proc
+                                                                 (lambda () (eopl:error 'apply-env "variable not found in environment: ~s" id)))))
+                                  (eval-exp body env))]
+               [define-exp (id body)
+                       (apply-env-ref global-env id
+                                      (lambda (r) (set-ref! r (eval-exp body env)))
+                                      (lambda ()
+                                       (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env))))]
+        
                [lambda-exp (vars bodies)
                            (closure vars bodies env)]
                [lambda-variable-exp (vars bodies)
@@ -632,6 +693,13 @@
      (map prim-proc
           *prim-proc-names*)
      (empty-env)))
+
+(define reset-global-env     
+  (lambda () (set! global-env (extend-env           
+                     *prim-proc-names*  
+                     (map prim-proc
+                          *prim-proc-names*)
+                     (empty-env)))))
 
 
 (define apply-prim-proc
