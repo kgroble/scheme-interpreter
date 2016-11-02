@@ -577,12 +577,12 @@
 
 ;; will need to change
 (define apply-k
-  (trace-lambda a-k (k v)
+  (lambda (k v)
     (cases continuation k
       [identity-k () v]
       [one-armed-test-k (then-exp env k)
                         (if v (eval-exp then-exp env k))]
-      [test-k (then-exp else-exp env k) 
+      [test-k (then-exp else-exp env k)
               (eval-exp (if v then-exp else-exp)
                         env
                         k)]
@@ -611,7 +611,6 @@
                       (cons-k v k))]
       [cons-k (first k)
               (apply-k k (cons first v))]
-
 
 )))
 
@@ -665,7 +664,7 @@
                                env
                                (one-armed-test-k then-exp env k))]
              [if-else-exp (conditional-exp then-exp else-exp)
-                          (eval-exp conditional-exp 
+                          (eval-exp conditional-exp
                                     env
                                     (test-k then-exp else-exp env k))]
              ; todo: continuation-ify
@@ -688,10 +687,10 @@
                                 (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env))))]
 
              [lambda-exp (vars bodies)
-                         (apply-k (closure vars bodies env) k)]
+                         (apply-k k (closure vars bodies env))]
 
              [lambda-variable-exp (vars bodies)
-                                  (apply-k (closure-variable vars bodies env) k)]
+                                  (apply-k k (closure-variable vars bodies env))]
 
              [letrec-exp (vars vals bodies)
                          (let ((new-env (extend-env-recursively vars vals env)))
@@ -726,11 +725,13 @@
 
 (define eval-rands
   (lambda (rands env k)
-          (map-cps (lambda (exp k) (eval-exp exp env k)) rands)))
+    (map-cps (lambda (exp map-k) (eval-exp exp env map-k))
+             rands
+             k)))
 
 
 (define map-cps
-  (trace-lambda map-c (cps-proc ls k)
+  (lambda (cps-proc ls k)
     (if (null? ls)
         (apply-k k '())
         (cps-proc (car ls)
@@ -756,7 +757,7 @@
            [closure (symbols bodies env)
                     (eval-bodies bodies (extend-env symbols args env) k)]
            [closure-variable (symbols bodies env)
-                             (eval-bodies bodies 
+                             (eval-bodies bodies
                                           (extend-env
                                                   (to-proper symbols)
                                                   (convert-variable-args symbols args)
@@ -808,73 +809,73 @@
 
 ;; args have been evaluated by this point
 (define apply-prim-proc
-  (lambda (prim-proc args)
-    (apply-k k 
+  (lambda (prim-proc args k)
     (case prim-proc
-      [(exit) (error 'exit "Exiting interpreter")]
-      [(void) (apply void args)]
-      [(+) (apply + args)] ; numerical procedures
-      [(-) (apply - args)]
-      [(*) (apply * args)]
-      [(/) (apply / args)]
-      [(quotient) (apply quotient args)]
-      [(add1) (apply add1 args)]
-      [(sub1) (apply sub1 args)]
-      [(=) (apply = args)]
-      [(<) (apply < args)]
-      [(<=) (apply <= args)]
-      [(>) (apply > args)]
-      [(>=) (apply >= args)]
-      [(not) (apply not args)]
-      [(cons) (apply cons args)] ; list procedures
-      [(list) (apply list args)]
-      [(append) (apply append args)]
-      [(list-tail) (apply list-tail args)]
-      [(assq) (apply assq args)]
-      [(length) (apply length args)]
-      [(list->vector) (apply list->vector args)] ; vector stuff
-      [(make-vector) (apply make-vector args)]
-      [(vector-ref) (apply vector-ref args)]
-      [(vector->list) (apply vector->list args)]
-      [(vector) (apply vector args)]
-      [(vector?) (apply vector? args)] ; predicates
-      [(number?) (apply number? args)]
-      [(symbol?) (apply symbol? args)]
-      [(zero?) (apply zero? args)]
-      [(null?) (apply null? args)]
-      [(atom?) (apply atom? args)]
-      [(procedure?) (if (= 1 (length args))
-                        (proc-val? (car args))
-                        (error 'apply-prim-proc "Incorrect number of arguments to procedure procedure?"))]
+      [(exit) (apply-k k (error 'exit "Exiting interpreter"))]
+      [(void) (apply-k k (apply void args))]
+      [(+) (apply-k k (apply + args))] ; numerical procedures
+      [(-) (apply-k k (apply - args))]
+      [(*) (apply-k k (apply * args))]
+      [(/) (apply-k k (apply / args))]
+      [(quotient) (apply-k k (apply quotient args))]
+      [(add1) (apply-k k (apply add1 args))]
+      [(sub1) (apply-k k (apply sub1 args))]
+      [(=) (apply-k k (apply = args))]
+      [(<) (apply-k k (apply < args))]
+      [(<=) (apply-k k (apply <= args))]
+      [(>) (apply-k k (apply > args))]
+      [(>=) (apply-k k (apply >= args))]
+      [(not) (apply-k k (apply not args))]
+      [(cons) (apply-k k (apply cons args))] ; list procedures
+      [(list) (apply-k k (apply list args))]
+      [(append) (apply-k k (apply append args))]
+      [(list-tail) (apply-k k (apply list-tail args))]
+      [(assq) (apply-k k (apply assq args))]
+      [(length) (apply-k k (apply length args))]
+      [(list->vector) (apply-k k (apply list->vector args))] ; vector stuff
+      [(make-vector) (apply-k k (apply make-vector args))]
+      [(vector-ref) (apply-k k (apply vector-ref args))]
+      [(vector->list) (apply-k k (apply vector->list args))]
+      [(vector) (apply-k k (apply vector args))]
+      [(vector?) (apply-k k (apply vector? args))] ; predicates
+      [(number?) (apply-k k (apply number? args))]
+      [(symbol?) (apply-k k (apply symbol? args))]
+      [(zero?) (apply-k k (apply zero? args))]
+      [(null?) (apply-k k (apply null? args))]
+      [(atom?) (apply-k k (apply atom? args))]
+      [(procedure?) (apply-k k (if (= 1 (length args))
+                                   (proc-val? (car args))
+                                   (error 'apply-prim-proc
+                                          "Incorrect number of arguments to procedure procedure?")))]
       [(map) (map-cps (lambda (arg map-k)
                           (apply-proc (car args) arg) map-k) (cadr args) k)]
-      [(apply) (apply-proc (car args) (flatten (cdr args)) k)]
-      [(list?) (apply list? args)]
-      [(pair?) (apply pair? args)]
-      [(eq?) (apply eq? args)]
-      [(eqv?) (apply eqv? args)]
-      [(equal?) (apply equal? args)]
-      [(member?) (not (not (apply member args)))]
-      [(car) (apply car args)] ; car/cdr procedures
-      [(cdr) (apply cdr args)]
-      [(cadr) (apply cadr args)]
-      [(cdar) (apply cdar args)]
-      [(caar) (apply caar args)]
-      [(cddr) (apply cddr args)]
-      [(caaar) (apply caaar args)]
-      [(caadr) (apply caadr args)]
-      [(cadar) (apply cadar args)]
-      [(cdaar) (apply cdaar args)]
-      [(caddr) (apply caddr args)]
-      [(cdadr) (apply cdadr args)]
-      [(cddar) (apply cddar args)]
-      [(cdddr) (apply cdddr args)]
-      [(vector-set!) (apply vector-set! args)] ; mutation procedures
-      [(set-car!) (apply set-car! args)]
-      [(set-cdr!) (apply set-cdr! args)]
-      [(display) (apply display args)] ; printing procedures
-      [(newline) (apply newline args)]
-      [(printf) (apply printf args)]
+      [(apply) (apply-proc (car args) (flatten (apply-k k (cdr args)) k))]
+      [(list?) (apply-k k (apply list? args))]
+      [(pair?) (apply-k k (apply pair? args))]
+      [(eq?) (apply-k k (apply eq? args))]
+      [(eqv?) (apply-k k (apply eqv? args))]
+      [(equal?) (apply-k k (apply equal? args))]
+      [(member?) (not (not (apply-k k (apply member args))))]
+      [(car) (apply-k k (apply car args))] ; car/cdr procedures
+      [(cdr) (apply-k k (apply cdr args))]
+      [(cadr) (apply-k k (apply cadr args))]
+      [(cdar) (apply-k k (apply cdar args))]
+      [(caar) (apply-k k (apply caar args))]
+      [(cddr) (apply-k k (apply cddr args))]
+      [(caaar) (apply-k k (apply caaar args))]
+      [(caadr) (apply-k k (apply caadr args))]
+      [(cadar) (apply-k k (apply cadar args))]
+      [(cdaar) (apply-k k (apply cdaar args))]
+      [(caddr) (apply-k k (apply caddr args))]
+      [(cdadr) (apply-k k (apply cdadr args))]
+      [(cddar) (apply-k k (apply cddar args))]
+      [(cdddr) (apply-k k (apply cdddr args))]
+      [(vector-set!) (apply-k k (apply vector-set! args))] ; mutation procedures
+      [(set-car!) (apply-k k (apply set-car! args))]
+      [(set-cdr!) (apply-k k (apply set-cdr! args))]
+      [(display) (apply-k k (apply display args))] ; printing procedures
+      [(newline) (apply-k k (apply newline args))]
+      [(printf) (apply-k k (apply printf args))]
       [else (error 'apply-prim-proc
                    "Bad primitive procedure name: ~s"
                    prim-proc)])))
@@ -909,6 +910,6 @@
 (define eval-one-exp
   (lambda (x) (top-level-eval (syntax-expand (parse-exp x)))))
 
-; (load "14-test.ss")(r)
-; (load "16-test.ss")(r)
-; (load "17-test.ss")(r)
+(load "14-test.ss")(r)
+(load "16-test.ss")(r)
+(load "17-test.ss")(r)
