@@ -605,6 +605,18 @@
 
       [rands-k (proc k)
                (apply-proc proc v k)]
+      [set-k (id k)
+             (apply-k k 
+                      (set-ref! (apply-env-ref env id
+                                               identity-proc
+                                               (lambda ()
+                                                 (apply-env-ref global-env id
+                                                                identity-proc
+                                                                (lambda () (eopl:error
+                                                                            'apply-env
+                                                                            "variable not found in environment: ~s"
+                                                                            id)))))
+                                v)]
       [map-k (proc cdr-of-list k)
              (map-cps proc
                       cdr-of-list
@@ -637,6 +649,8 @@
            (k continuation?)]
   [rands-k (proc-value scheme-value?)
            (k continuation?)]
+  [set-k (id symbol?)
+         (k continuation?)]
   [map-k (proc procedure?)
          (cdr-of-list list?)
          (k continuation?)]
@@ -668,24 +682,15 @@
                           (eval-exp conditional-exp 
                                     env
                                     (test-k then-exp else-exp env k))]
-             ; todo: continuation-ify
+
              [set-exp (id body)
-                      (set-ref! (apply-env-ref env id
-                                               identity-proc
-                                               (lambda ()
-                                                 (apply-env-ref global-env id
-                                                                identity-proc
-                                                                (lambda () (eopl:error
-                                                                            'apply-env
-                                                                            "variable not found in environment: ~s"
-                                                                            id)))))
-                                (eval-exp body env))]
-             ; todo: continuation-ify
+                      (eval-exp body env (set-k id k))]
+
              [define-exp (id body)
-               (apply-env-ref global-env id
-                              (lambda (r) (set-ref! r (eval-exp body env)))
-                             (lambda ()
-                                (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env))))]
+               (apply-k k (apply-env-ref global-env id
+                                         (lambda (r) (set-ref! r (eval-exp body env)))
+                                         (lambda ()
+                                           (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env)))))]
 
              [lambda-exp (vars bodies)
                          (apply-k (closure vars bodies env) k)]
