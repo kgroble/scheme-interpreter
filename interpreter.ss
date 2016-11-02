@@ -581,7 +581,9 @@
     (cases continuation k
       [identity-k () v]
       [one-armed-test-k (then-exp env k)
-                        (if v (eval-exp then-exp env k))]
+                        (if v
+                            (eval-exp then-exp env k)
+                            (apply-k k (void)))]
       [test-k (then-exp else-exp env k)
               (eval-exp (if v then-exp else-exp)
                         env
@@ -590,13 +592,19 @@
                 (if (null? remaining-bodies)
                     (apply-k k v)
                     (eval-bodies remaining-bodies env k))]
+
+      [while-test-k (test env k)
+                    (eval-exp test
+                              env
+                              k)]
+
       [while-k (bodies test env k)
                (if v
                    (eval-bodies bodies
                                 env
-                                (eval-exp test
-                                          env
-                                          (while-k bodies test env k)))
+                                (while-test-k test
+                                              env
+                                              (while-k bodies test env k)))
                    (apply-k k (void)))]
       [rator-k (rands env k)
                (eval-rands rands
@@ -606,7 +614,7 @@
       [rands-k (proc k)
                (apply-proc proc v k)]
       [set-k (id k)
-             (apply-k k 
+             (apply-k k
                       (set-ref! (apply-env-ref env id
                                                identity-proc
                                                (lambda ()
@@ -616,7 +624,7 @@
                                                                             'apply-env
                                                                             "variable not found in environment: ~s"
                                                                             id)))))
-                                v)]
+                                v))]
       [map-k (proc cdr-of-list k)
              (map-cps proc
                       cdr-of-list
@@ -643,6 +651,9 @@
            (test expression?)
            (env environment?)
            (k continuation?)]
+  [while-test-k (test expression?)
+                (env environment?)
+                (k continuation?)]
   [rator-k (rands (list-of expression?))
            (env environment?)
            (k continuation?)]
@@ -853,8 +864,11 @@
                                    (error 'apply-prim-proc
                                           "Incorrect number of arguments to procedure procedure?")))]
       [(map) (map-cps (lambda (arg map-k)
-                          (apply-proc (car args) arg) map-k) (cadr args) k)]
-      [(apply) (apply-proc (car args) (flatten (apply-k k (cdr args)) k))]
+                        (apply-proc (car args) (list arg) map-k))
+                      (cadr args)
+                      k)]
+      [(apply) (apply-proc (car args) (flatten (apply-k k (cdr args)))
+                           k)]
       [(list?) (apply-k k (apply list? args))]
       [(pair?) (apply-k k (apply pair? args))]
       [(eq?) (apply-k k (apply eq? args))]
