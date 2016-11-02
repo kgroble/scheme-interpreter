@@ -711,10 +711,6 @@
                (eval-exp body
                          env
                          (define-k id k))]
-               ; (apply-k k (apply-env-ref global-env id
-               ;                           (lambda (r) (set-ref! r (eval-exp body env)))
-               ;                           (lambda ()
-               ;                             (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env)))))]
 
              [lambda-exp (vars bodies)
                          (apply-k k (closure vars bodies env))]
@@ -724,8 +720,6 @@
 
              [letrec-exp (vars vals bodies)
                          (extend-env-recursively vars vals bodies env k)]
-                         ; (let ((new-env (extend-env-recursively vars vals env)))
-                         ;   (eval-bodies bodies new-env k))]
 
              [while-exp (test bodies)
                         (eval-exp test
