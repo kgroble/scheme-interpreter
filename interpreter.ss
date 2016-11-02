@@ -113,8 +113,48 @@
    (condition expression?)
    (bodies (list-of expression?))])
 
+(define environment? (list-of pair?))
 
-
+(define-datatype continuation continuation?
+  [identity-k]
+  [one-armed-test-k (then-exp expression?)
+                    (env environment?)
+                    (k continuation?)]
+  [test-k (then-exp expression?)
+          (else-exp expression?)
+          (env environment?)
+          (k continuation?)]
+  [bodies-k (remaining-bodies (list-of expression?))
+            (env environment?)
+            (k continuation?)]
+  [while-k (bodies (list-of expression?))
+           (test expression?)
+           (env environment?)
+           (k continuation?)]
+  [while-test-k (test expression?)
+                (env environment?)
+                (k continuation?)]
+  [rator-k (rands (list-of expression?))
+           (env environment?)
+           (k continuation?)]
+  [rands-k (proc-value scheme-value?)
+           (k continuation?)]
+  [set-k (id symbol?)
+         (env environment?)
+         (k continuation?)]
+  [map-k (proc procedure?)
+         (cdr-of-list list?)
+         (k continuation?)]
+  [cons-k (first scheme-value?)
+          (k continuation?)]
+  [letrec-k (vec vector?)
+            (index integer?)
+            (remaining-expressions (list-of expression?))
+            (bodies (list-of expression?))
+            (env environment?)
+            (k continuation?)]
+  [define-k (id symbol?)
+            (k continuation?)])
 
 
 ;; datatype for procedures.  At first there is only one
@@ -362,9 +402,6 @@
 
 
 
-
-
-
 ;;-------------------+
 ;;                   |
 ;;   ENVIRONMENTS    |
@@ -377,12 +414,9 @@
 (define scheme-value?
   (lambda (x) #t))
 
-(define environment? (list-of pair?))
-
 (define empty-env
   (lambda ()
     '()))
-
 
 (define extend-env
   (lambda (symbols values env)
@@ -392,19 +426,15 @@
 
 
 (define extend-env-recursively
-  (lambda (symbols expressions env)
+  (lambda (symbols expressions bodies env k)
     (let* ((len (length symbols))
            (new-env (extend-env symbols (make-list len 'this-should-go-away) env))
            (vec (cdar new-env)))
-      (for-each
-       (lambda (pos exp)
-         (vector-set! vec
-                      pos
-                      (eval-exp exp new-env)))
-       (iota len)
-       expressions)
-      new-env)))
-
+          (if (null? symbols)
+              (eval-bodies bodies new-env k)
+              (eval-exp (car expressions)
+                        new-env
+                        (letrec-k vec 0 (cdr expressions) bodies new-env k))))))
 
 (define apply-env
   (lambda (env symbol success fail)
@@ -434,9 +464,6 @@
              (if (number? list-index-r)
                  (+ 1 list-index-r)
                  #f))))))
-
-
-
 
 
 
@@ -577,95 +604,79 @@
 
 ;; will need to change
 (define apply-k
-  (lambda (k v)
-    (cases continuation k
-      [identity-k () v]
-      [one-armed-test-k (then-exp env k)
-                        (if v
-                            (eval-exp then-exp env k)
-                            (apply-k k (void)))]
-      [test-k (then-exp else-exp env k)
-              (eval-exp (if v then-exp else-exp)
-                        env
-                        k)]
-      [bodies-k (remaining-bodies env k)
-                (if (null? remaining-bodies)
-                    (apply-k k v)
-                    (eval-bodies remaining-bodies env k))]
+  (let ((identity-proc (lambda (v) v)))
+       (lambda (k v)
+         (cases continuation k
+           [identity-k () v]
+           [one-armed-test-k (then-exp env k)
+                             (if v
+                                 (eval-exp then-exp env k)
+                                 (apply-k k (void)))]
+           [test-k (then-exp else-exp env k)
+                   (eval-exp (if v then-exp else-exp)
+                             env
+                             k)]
+           [bodies-k (remaining-bodies env k)
+                     (if (null? remaining-bodies)
+                         (apply-k k v)
+                         (eval-bodies remaining-bodies env k))]
+ 
+            [while-test-k (test env k)
+                          (eval-exp test
+                                    env
+                                    k)]
+ 
+            [while-k (bodies test env k)
+                     (if v
+                         (eval-bodies bodies
+                                      env
+                                      (while-test-k test
+                                                    env
+                                                    (while-k bodies test env k)))
+                         (apply-k k (void)))]
+            [rator-k (rands env k)
+                     (eval-rands rands
+                                 env
+                                 (rands-k v k))]
+ 
+            [rands-k (proc k)
+                     (apply-proc proc v k)]
+            [set-k (id env k)
+                   (apply-k k
+                            (set-ref! (apply-env-ref env id
+                                                     identity-proc
+                                                     (lambda ()
+                                                       (apply-env-ref global-env id
+                                                                      identity-proc
+                                                                      (lambda () (eopl:error
+                                                                                  'apply-env
+                                                                                  "variable not found in environment: ~s"
+                                                                                  id)))))
+                                      v))]
+            [map-k (proc cdr-of-list k)
+                   (map-cps proc
+                            cdr-of-list
+                            (cons-k v k))]
+            [cons-k (first k)
+                    (apply-k k (cons first v))]
+            [letrec-k (vec index remaining-expressions bodies env k)
+                      (vector-set! vec index v)
+                      (if (null? remaining-expressions)
+                          (eval-bodies bodies env k)
+                          (eval-exp (car remaining-expressions)
+                                    env
+                                    (letrec-k vec (+ index 1) (cdr remaining-expressions) bodies env k)))]
+            [define-k (id k)
+                      (apply-k k (apply-env-ref global-env id
+                                                (lambda (r) (set-ref! r v))
+                                                (lambda ()
+                                                        (set-car! global-env
+                                                              (cons (cons id (caar global-env))
+                                                                    (list->vector (cons v
+                                                                                        (vector->list (cdar global-env)))))))))]
+ 
+))))
 
-      [while-test-k (test env k)
-                    (eval-exp test
-                              env
-                              k)]
-
-      [while-k (bodies test env k)
-               (if v
-                   (eval-bodies bodies
-                                env
-                                (while-test-k test
-                                              env
-                                              (while-k bodies test env k)))
-                   (apply-k k (void)))]
-      [rator-k (rands env k)
-               (eval-rands rands
-                           env
-                           (rands-k v k))]
-
-      [rands-k (proc k)
-               (apply-proc proc v k)]
-      [set-k (id k)
-             (apply-k k
-                      (set-ref! (apply-env-ref env id
-                                               identity-proc
-                                               (lambda ()
-                                                 (apply-env-ref global-env id
-                                                                identity-proc
-                                                                (lambda () (eopl:error
-                                                                            'apply-env
-                                                                            "variable not found in environment: ~s"
-                                                                            id)))))
-                                v))]
-      [map-k (proc cdr-of-list k)
-             (map-cps proc
-                      cdr-of-list
-                      (cons-k v k))]
-      [cons-k (first k)
-              (apply-k k (cons first v))]
-
-)))
-
-
-(define-datatype continuation continuation?
-  [identity-k]
-  [one-armed-test-k (then-exp expression?)
-                    (env environment?)
-                    (k continuation?)]
-  [test-k (then-exp expression?)
-          (else-exp expression?)
-          (env environment?)
-          (k continuation?)]
-  [bodies-k (remaining-bodies (list-of expression?))
-            (env environment?)
-            (k continuation?)]
-  [while-k (bodies (list-of expression?))
-           (test expression?)
-           (env environment?)
-           (k continuation?)]
-  [while-test-k (test expression?)
-                (env environment?)
-                (k continuation?)]
-  [rator-k (rands (list-of expression?))
-           (env environment?)
-           (k continuation?)]
-  [rands-k (proc-value scheme-value?)
-           (k continuation?)]
-  [set-k (id symbol?)
-         (k continuation?)]
-  [map-k (proc procedure?)
-         (cdr-of-list list?)
-         (k continuation?)]
-  [cons-k (first scheme-value?)
-          (k continuation?)])
 
 
 ;; top-level-eval evaluates a form in the global environment
@@ -694,13 +705,16 @@
                                     (test-k then-exp else-exp env k))]
 
              [set-exp (id body)
-                      (eval-exp body env (set-k id k))]
+                      (eval-exp body env (set-k id env k))]
 
              [define-exp (id body)
-               (apply-k k (apply-env-ref global-env id
-                                         (lambda (r) (set-ref! r (eval-exp body env)))
-                                         (lambda ()
-                                           (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env)))))]
+               (eval-exp body
+                         env
+                         (define-k id k))]
+               ; (apply-k k (apply-env-ref global-env id
+               ;                           (lambda (r) (set-ref! r (eval-exp body env)))
+               ;                           (lambda ()
+               ;                             (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env)))))]
 
              [lambda-exp (vars bodies)
                          (apply-k k (closure vars bodies env))]
@@ -709,8 +723,9 @@
                                   (apply-k k (closure-variable vars bodies env))]
 
              [letrec-exp (vars vals bodies)
-                         (let ((new-env (extend-env-recursively vars vals env)))
-                           (eval-bodies bodies new-env k))]
+                         (extend-env-recursively vars vals bodies env k)]
+                         ; (let ((new-env (extend-env-recursively vars vals env)))
+                         ;   (eval-bodies bodies new-env k))]
 
              [while-exp (test bodies)
                         (eval-exp test
