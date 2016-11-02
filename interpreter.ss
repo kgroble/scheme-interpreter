@@ -126,11 +126,11 @@
   [closure
    (vars (list-of symbol?))
    (bodies (list-of expression?))
-   (env (list-of pair?))]
+   (env environment?)]
   [closure-variable
    (vars (lambda (x) (or (symbol? x) (improper? x))))
    (bodies (list-of expression?))
-   (env (list-of pair?))])
+   (env environment?)])
 
 
 (define-datatype reference reference?
@@ -164,6 +164,8 @@
             (if (number? pos)
                 (success (ref values pos))
                 (apply-env-ref enclosing-env symbol success fail)))))))
+
+
 
 
 ;;-------------------+
@@ -375,6 +377,7 @@
 (define scheme-value?
   (lambda (x) #t))
 
+(define environment? (list-of pair?))
 
 (define empty-env
   (lambda ()
@@ -574,12 +577,71 @@
 
 ;; will need to change
 (define apply-k
-  (lambda (k val)
-    (k val)))
+  (trace-lambda a-k (k v)
+    (cases continuation k
+      [identity-k () v]
+      [one-armed-test-k (then-exp env k)
+                        (if v (eval-exp then-exp env k))]
+      [test-k (then-exp else-exp env k) 
+              (eval-exp (if v then-exp else-exp)
+                        env
+                        k)]
+      [bodies-k (remaining-bodies env k)
+                (if (null? remaining-bodies)
+                    (apply-k k v)
+                    (eval-bodies remaining-bodies env k))]
+      [while-k (bodies test env k)
+               (if v
+                   (eval-bodies bodies
+                                env
+                                (eval-exp test
+                                          env
+                                          (while-k bodies test env k)))
+                   (apply-k k (void)))]
+      [rator-k (rands env k)
+               (eval-rands rands
+                           env
+                           (rands-k v k))]
+
+      [rands-k (proc k)
+               (apply-proc proc v k)]
+      [map-k (proc cdr-of-list k)
+             (map-cps proc
+                      cdr-of-list
+                      (cons-k v k))]
+      [cons-k (first k)
+              (apply-k k (cons first v))]
 
 
-;;(define-datatype continuation
-  ;;[if-exp
+)))
+
+
+(define-datatype continuation continuation?
+  [identity-k]
+  [one-armed-test-k (then-exp expression?)
+                    (env environment?)
+                    (k continuation?)]
+  [test-k (then-exp expression?)
+          (else-exp expression?)
+          (env environment?)
+          (k continuation?)]
+  [bodies-k (remaining-bodies (list-of expression?))
+            (env environment?)
+            (k continuation?)]
+  [while-k (bodies (list-of expression?))
+           (test expression?)
+           (env environment?)
+           (k continuation?)]
+  [rator-k (rands (list-of expression?))
+           (env environment?)
+           (k continuation?)]
+  [rands-k (proc-value scheme-value?)
+           (k continuation?)]
+  [map-k (proc procedure?)
+         (cdr-of-list list?)
+         (k continuation?)]
+  [cons-k (first scheme-value?)
+          (k continuation?)])
 
 
 ;; top-level-eval evaluates a form in the global environment
@@ -587,7 +649,7 @@
 (define top-level-eval
   (lambda (form)
     ;; later we may add things that are not expressions.
-    (eval-exp form (empty-env))))
+    (eval-exp form (empty-env) (identity-k))))
 
 
 ;; eval-exp is the main component of the interpreter
@@ -595,16 +657,18 @@
 
 (define eval-exp
   (let ((identity-proc (lambda (x) x)))
-    (lambda (exp env)
+    (lambda (exp env k)
       (cases expression exp
-             [lit-exp (datum) datum]
+             [lit-exp (datum) (apply-k k datum)]
              [if-exp (conditional-exp then-exp)
-                     (if (eval-exp conditional-exp env)
-                         (eval-exp then-exp env))]
+                     (eval-exp conditional-exp
+                               env
+                               (one-armed-test-k then-exp env k))]
              [if-else-exp (conditional-exp then-exp else-exp)
-                          (if (eval-exp conditional-exp env)
-                              (eval-exp then-exp env)
-                              (eval-exp else-exp env))]
+                          (eval-exp conditional-exp 
+                                    env
+                                    (test-k then-exp else-exp env k))]
+             ; todo: continuation-ify
              [set-exp (id body)
                       (set-ref! (apply-env-ref env id
                                                identity-proc
@@ -616,68 +680,88 @@
                                                                             "variable not found in environment: ~s"
                                                                             id)))))
                                 (eval-exp body env))]
+             ; todo: continuation-ify
              [define-exp (id body)
                (apply-env-ref global-env id
                               (lambda (r) (set-ref! r (eval-exp body env)))
-                              (lambda ()
+                             (lambda ()
                                 (set! global-env (extend-env (list id) (list (eval-exp body env)) global-env))))]
 
              [lambda-exp (vars bodies)
-                         (closure vars bodies env)]
+                         (apply-k (closure vars bodies env) k)]
+
              [lambda-variable-exp (vars bodies)
-                                  (closure-variable vars bodies env)]
+                                  (apply-k (closure-variable vars bodies env) k)]
+
              [letrec-exp (vars vals bodies)
                          (let ((new-env (extend-env-recursively vars vals env)))
-                           (eval-bodies bodies new-env))]
+                           (eval-bodies bodies new-env k))]
+
              [while-exp (test bodies)
-                        (if (eval-exp test env)
-                            (begin (eval-bodies bodies env) (eval-exp exp env)))]
+                        (eval-exp test
+                                  env
+                                  (while-k bodies
+                                           test
+                                           env
+                                           k))]
+
              [var-exp (id)
-                      (apply-env env id ; look up its value.
-                                 identity-proc ; procedure to call if id is in the environment
-                                 (lambda ()
-                                   (apply-env global-env id
-                                              identity-proc
-                                              (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
-                                                                     "variable not found in environment: ~s" id)))))]
+                      (apply-k k (apply-env env id ; look up its value.
+                                            identity-proc ; procedure to call if id is in the environment
+                                            (lambda ()
+                                              (apply-env global-env id
+                                                         identity-proc
+                                                         (lambda () (eopl:error 'apply-env ; procedure to call if id not in env
+                                                                                "variable not found in environment: ~s" id))))))]
+
              [app-exp (rator rands)
-                      (let ([proc-value (eval-exp rator env)]
-                            [args (eval-rands rands env)])
-                        (apply-proc proc-value args))]
+                      (eval-exp rator
+                                env
+                                (rator-k rands env k))]
+
              [else (eopl:error 'eval-exp "Bad abstract syntax: ~a" exp)]))))
 
 
 ;; evaluate the list of operands, putting results into a list
 
 (define eval-rands
-  (lambda (rands env)
-    (map (lambda (exp) (eval-exp exp env)) rands)))
+  (lambda (rands env k)
+          (map-cps (lambda (exp k) (eval-exp exp env k)) rands)))
 
+
+(define map-cps
+  (trace-lambda map-c (cps-proc ls k)
+    (if (null? ls)
+        (apply-k k '())
+        (cps-proc (car ls)
+                  (map-k cps-proc (cdr ls) k)))))
 
 ;; evalute a list of expressions in order, returning the last
 
 (define eval-bodies
-  (lambda (bodies env)
-    (if (null? (cdr bodies))
-        (eval-exp (car bodies) env)
-        (begin (eval-exp (car bodies) env)
-               (eval-bodies (cdr bodies) env)))))
+  (lambda (bodies env k)
+        (eval-exp (car bodies)
+                  env
+                  (bodies-k (cdr bodies) env k))))
+
 
 
 ;; Apply a procedure to its arguments.
 ;; expressions given as arguments are resolved to values here
 
 (define apply-proc
-  (lambda (proc-value args)
+  (lambda (proc-value args k)
     (cases proc-val proc-value
-           [prim-proc (op) (apply-prim-proc op args)]
+           [prim-proc (op) (apply-prim-proc op args k)]
            [closure (symbols bodies env)
-                    (eval-bodies bodies (extend-env symbols args env))]
+                    (eval-bodies bodies (extend-env symbols args env) k)]
            [closure-variable (symbols bodies env)
-                             (eval-bodies bodies (extend-env
+                             (eval-bodies bodies 
+                                          (extend-env
                                                   (to-proper symbols)
                                                   (convert-variable-args symbols args)
-                                                  env))]
+                                                  env)
+                                          k)]
            ;; You will add other cases
            [else (eopl:error 'apply-proc
                              "Attempt to apply bad procedure: ~s"
@@ -725,6 +809,7 @@
 ;; args have been evaluated by this point
 (define apply-prim-proc
   (lambda (prim-proc args)
+    (apply-k k 
     (case prim-proc
       [(exit) (error 'exit "Exiting interpreter")]
       [(void) (apply void args)]
@@ -761,9 +846,9 @@
       [(procedure?) (if (= 1 (length args))
                         (proc-val? (car args))
                         (error 'apply-prim-proc "Incorrect number of arguments to procedure procedure?"))]
-      [(map) (apply map (lambda col-of-args
-                          (apply-proc (car args) col-of-args)) (cdr args))]
-      [(apply) (apply-proc (car args) (flatten (cdr args)))]
+      [(map) (map-cps (lambda (arg map-k)
+                          (apply-proc (car args) arg) map-k) (cadr args) k)]
+      [(apply) (apply-proc (car args) (flatten (cdr args)) k)]
       [(list?) (apply list? args)]
       [(pair?) (apply pair? args)]
       [(eq?) (apply eq? args)]
@@ -811,7 +896,7 @@
       (cond
        [(eq? (void) answer)
         (newline)]
-
+       [(proc-val? answer)
         (cases proc-val answer
                [prim-proc (op)
                           (display "#<procedure ") (display op) (display ">")
@@ -824,6 +909,6 @@
 (define eval-one-exp
   (lambda (x) (top-level-eval (syntax-expand (parse-exp x)))))
 
-(load "14-test.ss")(r)
-(load "16-test.ss")(r)
-(load "17-test.ss")(r)
+; (load "14-test.ss")(r)
+; (load "16-test.ss")(r)
+; (load "17-test.ss")(r)
