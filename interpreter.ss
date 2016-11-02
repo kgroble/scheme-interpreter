@@ -874,7 +874,7 @@
       [(eq?) (apply-k k (apply eq? args))]
       [(eqv?) (apply-k k (apply eqv? args))]
       [(equal?) (apply-k k (apply equal? args))]
-      [(member?) (not (not (apply-k k (apply member args))))]
+      [(member?) (apply-k k (not (not (apply member args))))]
       [(car) (apply-k k (apply car args))] ; car/cdr procedures
       [(cdr) (apply-k k (apply cdr args))]
       [(cadr) (apply-k k (apply cadr args))]
