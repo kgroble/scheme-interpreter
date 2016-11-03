@@ -117,6 +117,7 @@
 
 (define-datatype continuation continuation?
   [identity-k]
+
   [one-armed-test-k (then-exp expression?)
                     (env environment?)
                     (k continuation?)]
@@ -170,7 +171,10 @@
   [closure-variable
    (vars (lambda (x) (or (symbol? x) (improper? x))))
    (bodies (list-of expression?))
-   (env environment?)])
+   (env environment?)]
+  [call/cc-closure
+   ;;(closure proc-val?)
+   (k continuation?)])
 
 
 (define-datatype reference reference?
@@ -608,24 +612,30 @@
        (lambda (k v)
          (cases continuation k
            [identity-k () v]
+
+           ;;[call/cc-k (k)
+                      ;;(apply-k k v)]
+
            [one-armed-test-k (then-exp env k)
                              (if v
                                  (eval-exp then-exp env k)
                                  (apply-k k (void)))]
+
            [test-k (then-exp else-exp env k)
                    (eval-exp (if v then-exp else-exp)
                              env
                              k)]
+
            [bodies-k (remaining-bodies env k)
                      (if (null? remaining-bodies)
                          (apply-k k v)
                          (eval-bodies remaining-bodies env k))]
- 
+
             [while-test-k (test env k)
                           (eval-exp test
                                     env
                                     k)]
- 
+
             [while-k (bodies test env k)
                      (if v
                          (eval-bodies bodies
@@ -638,9 +648,10 @@
                      (eval-rands rands
                                  env
                                  (rands-k v k))]
- 
+
             [rands-k (proc k)
                      (apply-proc proc v k)]
+
             [set-k (id env k)
                    (apply-k k
                             (set-ref! (apply-env-ref env id
@@ -653,12 +664,17 @@
                                                                                   "variable not found in environment: ~s"
                                                                                   id)))))
                                       v))]
+
+
+
             [map-k (proc cdr-of-list k)
                    (map-cps proc
                             cdr-of-list
                             (cons-k v k))]
+
             [cons-k (first k)
                     (apply-k k (cons first v))]
+
             [letrec-k (vec index remaining-expressions bodies env k)
                       (vector-set! vec index v)
                       (if (null? remaining-expressions)
@@ -666,16 +682,16 @@
                           (eval-exp (car remaining-expressions)
                                     env
                                     (letrec-k vec (+ index 1) (cdr remaining-expressions) bodies env k)))]
+
             [define-k (id k)
                       (apply-k k (apply-env-ref global-env id
                                                 (lambda (r) (set-ref! r v))
                                                 (lambda ()
-                                                        (set-car! global-env
-                                                              (cons (cons id (caar global-env))
-                                                                    (list->vector (cons v
-                                                                                        (vector->list (cdar global-env)))))))))]
- 
-))))
+                                                  (set-car! global-env
+                                                            (cons (cons id (caar global-env))
+                                                                  (list->vector (cons v
+                                                                                      (vector->list (cdar global-env)))))))))]
+            ))))
 
 
 
@@ -788,7 +804,10 @@
                                                   (convert-variable-args symbols args)
                                                   env)
                                           k)]
-           ;; You will add other cases
+           [call/cc-closure (stored-k)
+                            (apply-k stored-k (car args))]
+
+
            [else (eopl:error 'apply-proc
                              "Attempt to apply bad procedure: ~s"
                              proc-value)])))
@@ -813,7 +832,8 @@
                               list null? assq eq? equal? atom? length list->vector list? pair? map apply
                               procedure? vector->list vector vector-set! display newline cadr cdar caar cddr
                               caaar caadr cadar cdaar caddr cdadr cddar cdddr make-vector vector-ref set-car!
-                              set-cdr! vector? number? symbol? exit void member? append eqv? list-tail printf))
+                              set-cdr! vector? number? symbol? exit void member? append eqv? list-tail printf
+                              call/cc call-with-current-continuation))
 
 
 (define global-env
@@ -836,6 +856,13 @@
 (define apply-prim-proc
   (lambda (prim-proc args k)
     (case prim-proc
+
+      [(call-with-current-continuation) (apply-prim-proc 'call/cc args k)]
+      [(call/cc)
+         (apply-proc (car args)
+                     (list (call/cc-closure k))
+                     k)]
+
       [(exit) (apply-k k (error 'exit "Exiting interpreter"))]
       [(void) (apply-k k (apply void args))]
       [(+) (apply-k k (apply + args))] ; numerical procedures
@@ -876,7 +903,8 @@
                         (apply-proc (car args) (list arg) map-k))
                       (cadr args)
                       k)]
-      [(apply) (apply-proc (car args) (flatten (apply-k k (cdr args)))
+      [(apply) (apply-proc (car args)
+                           (flatten (apply-k k (cdr args)))
                            k)]
       [(list?) (apply-k k (apply list? args))]
       [(pair?) (apply-k k (apply pair? args))]
@@ -941,3 +969,4 @@
 (load "14-test.ss")(r)
 (load "16-test.ss")(r)
 (load "17-test.ss")(r)
+(load "18-test.ss")(r)
