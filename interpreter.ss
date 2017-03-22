@@ -3,6 +3,7 @@
 ;; Easier to submit to server, probably harder to use in the development process
 
 (load "chez-init.ss")
+(define cps-debugging #t)
 
 ;;-------------------+
 ;;                   |
@@ -173,7 +174,6 @@
    (bodies (list-of expression?))
    (env environment?)]
   [call/cc-closure
-   ;;(closure proc-val?)
    (k continuation?)])
 
 
@@ -248,6 +248,7 @@
 
 
 (define parse-exp
+  ;;(trace-define parse-exp
   (lambda (datum)
     (cond
 
@@ -607,6 +608,7 @@
 
 
 ;; will need to change
+;;(trace-define apply-k
 (define apply-k
   (let ((identity-proc (lambda (v) v)))
        (lambda (k v)
@@ -691,6 +693,7 @@
                                                             (cons (cons id (caar global-env))
                                                                   (list->vector (cons v
                                                                                       (vector->list (cdar global-env)))))))))]
+
             ))))
 
 
@@ -707,6 +710,7 @@
 ;; evaluates an expression
 
 (define eval-exp
+  ;;(trace-define eval-exp
   (let ((identity-proc (lambda (x) x)))
     (lambda (exp env k)
       (cases expression exp
@@ -791,12 +795,15 @@
 ;; Apply a procedure to its arguments.
 ;; expressions given as arguments are resolved to values here
 
+;;(trace-define apply-proc
 (define apply-proc
   (lambda (proc-value args k)
     (cases proc-val proc-value
            [prim-proc (op) (apply-prim-proc op args k)]
+
            [closure (symbols bodies env)
                     (eval-bodies bodies (extend-env symbols args env) k)]
+
            [closure-variable (symbols bodies env)
                              (eval-bodies bodies
                                           (extend-env
@@ -804,9 +811,9 @@
                                                   (convert-variable-args symbols args)
                                                   env)
                                           k)]
-           [call/cc-closure (stored-k)
-                            (apply-k stored-k (car args))]
 
+           [call/cc-closure (stored-k)
+                            (apply apply-k stored-k args)]
 
            [else (eopl:error 'apply-proc
                              "Attempt to apply bad procedure: ~s"
@@ -833,7 +840,7 @@
                               procedure? vector->list vector vector-set! display newline cadr cdar caar cddr
                               caaar caadr cadar cdaar caddr cdadr cddar cdddr make-vector vector-ref set-car!
                               set-cdr! vector? number? symbol? exit void member? append eqv? list-tail printf
-                              call/cc call-with-current-continuation))
+                              call/cc call-with-current-continuation exit-list))
 
 
 (define global-env
@@ -853,15 +860,19 @@
 
 
 ;; args have been evaluated by this point
+;;(trace-define apply-prim-proc
 (define apply-prim-proc
   (lambda (prim-proc args k)
     (case prim-proc
 
-      [(call-with-current-continuation) (apply-prim-proc 'call/cc args k)]
+      [(call-with-current-continuation)
+       (apply-prim-proc 'call/cc args k)]
       [(call/cc)
-         (apply-proc (car args)
-                     (list (call/cc-closure k))
-                     k)]
+       (apply-proc (car args)
+                   (list (call/cc-closure k))
+                   k)]
+      [(exit-list)
+       (apply-k (identity-k) args)]
 
       [(exit) (apply-k k (error 'exit "Exiting interpreter"))]
       [(void) (apply-k k (apply void args))]
@@ -903,9 +914,11 @@
                         (apply-proc (car args) (list arg) map-k))
                       (cadr args)
                       k)]
+
       [(apply) (apply-proc (car args)
-                           (flatten (apply-k k (cdr args)))
+                           (flatten (cdr args))
                            k)]
+
       [(list?) (apply-k k (apply list? args))]
       [(pair?) (apply-k k (apply pair? args))]
       [(eq?) (apply-k k (apply eq? args))]
@@ -939,10 +952,9 @@
 
 (define flatten
   (lambda (ls)
-    (cond
-     [(null? ls) '()]
-     [(null? (cdr ls)) (car ls)]
-     [else (cons (car ls) (flatten (cdr ls)))])))
+    (cond [(null? ls) '()]
+          [(null? (cdr ls)) (car ls)]
+          [else (cons (car ls) (flatten (cdr ls)))])))
 
 
 (define rep      ; "read-eval-print" loop.
@@ -966,7 +978,7 @@
 (define eval-one-exp
   (lambda (x) (top-level-eval (syntax-expand (parse-exp x)))))
 
-(load "14-test.ss")(r)
-(load "16-test.ss")(r)
-(load "17-test.ss")(r)
-(load "18-test.ss")(r)
+;(load "14-test.ss")(r)
+;(load "16-test.ss")(r)
+;(load "17-test.ss")(r)
+;(load "18-test.ss")(r)
